@@ -37,7 +37,6 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 
-
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,62 +52,66 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var imgUri by remember { mutableStateOf<Uri?>(null) }
-    var recognizedText by remember { mutableStateOf<String>("") }
-    var translatedText by remember { mutableStateOf<String>("") }
+    var recognizedText by remember { mutableStateOf("") }
+    var translatedText by remember { mutableStateOf("") }
 
-    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         imgUri = uri
-        uri?.let { processImage(context, it) { recognizedText = it; translateText(context, recognizedText) { translatedText = it } } }
+        uri?.let {
+            recognizeAndTranslateText(context, it) { recognized, translated ->
+                recognizedText = recognized
+                translatedText = translated
+            }
+        }
     }
 
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
-
     ) {
-        imgUri?.let { uri ->
+        imgUri?.let {
             Image(
+                painter = rememberAsyncImagePainter(model = it),
+                contentDescription = null,
                 modifier = Modifier
                     .padding(16.dp)
                     .height(200.dp)
-                    .fillMaxSize(),
-                painter = rememberAsyncImagePainter(model = uri),
-                contentDescription = null
+                    .fillMaxSize()
             )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = {
-            pickMedia.launch("image/*")
-        }) {
-            Text(text = "Pick Image")
+        Button(onClick = { pickImageLauncher.launch("image/*") }) {
+            Text("Pick Image")
         }
-
 
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(text = recognizedText)
-
         Spacer(modifier = Modifier.height(16.dp))
-
         Text(text = translatedText)
-
-
     }
 }
 
+fun recognizeAndTranslateText(context: Context, uri: Uri, onResult: (String, String) -> Unit) {
+    recognizeTextFromImage(context, uri) { recognizedText ->
+        translateText(context, recognizedText) { translatedText ->
+            onResult(recognizedText, translatedText)
+        }
+    }
+}
 
-fun processImage(context: Context, uri: Uri, onResult: (String) -> Unit) {
+fun recognizeTextFromImage(context: Context, uri: Uri, onResult: (String) -> Unit) {
     val recognizer = TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
     val image = InputImage.fromFilePath(context, uri)
-    recognizer.process(image).addOnSuccessListener { visionText ->
-        onResult(visionText.text)
-    }.addOnFailureListener { e ->
-        Log.e("TextRecognition", "Text recognition failed", e)
-        onResult("")
-    }
+    recognizer.process(image)
+        .addOnSuccessListener { visionText -> onResult(visionText.text) }
+        .addOnFailureListener { e ->
+            Log.e("TextRecognition", "Text recognition failed", e)
+            onResult("")
+        }
 }
 
 fun translateText(context: Context, text: String, onResult: (String) -> Unit) {
@@ -122,18 +125,21 @@ fun translateText(context: Context, text: String, onResult: (String) -> Unit) {
         .requireWifi()
         .build()
 
-    translator.downloadModelIfNeeded(conditions).addOnSuccessListener {
-        translator.translate(text).addOnSuccessListener { translatedText ->
-            onResult(translatedText)
-        }.addOnFailureListener { e ->
-            Log.e("Translation", "Translation failed", e)
+    translator.downloadModelIfNeeded(conditions)
+        .addOnSuccessListener {
+            translator.translate(text)
+                .addOnSuccessListener { translatedText -> onResult(translatedText) }
+                .addOnFailureListener { e ->
+                    Log.e("Translation", "Translation failed", e)
+                    onResult("")
+                }
+        }
+        .addOnFailureListener { e ->
+            Log.e("Translation", "Model download failed", e)
             onResult("")
         }
-    }.addOnFailureListener { e ->
-        Log.e("Translation", "Model download failed", e)
-        onResult("")
-    }
 }
+
 @Preview(showBackground = true)
 @Composable
 fun MainScreenPreview() {
