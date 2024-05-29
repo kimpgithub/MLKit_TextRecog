@@ -85,6 +85,9 @@ dependencies {
 
     implementation("io.coil-kt:coil-compose:2.6.0")
 
+    implementation ("com.google.mlkit:translate:17.0.2")
+
+
 
 
 }

@@ -29,6 +29,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 import com.example.mlkit_textrecog.ui.theme.MLKit_TextRecogTheme
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.TranslatorOptions
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
@@ -50,9 +54,11 @@ fun MainScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var imgUri by remember { mutableStateOf<Uri?>(null) }
     var recognizedText by remember { mutableStateOf<String>("") }
+    var translatedText by remember { mutableStateOf<String>("") }
+
     val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         imgUri = uri
-        uri?.let { processImage(context, it) { recognizedText = it } }
+        uri?.let { processImage(context, it) { recognizedText = it; translateText(context, recognizedText) { translatedText = it } } }
     }
 
     Column(
@@ -85,6 +91,11 @@ fun MainScreen(modifier: Modifier = Modifier) {
 
         Text(text = recognizedText)
 
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(text = translatedText)
+
+
     }
 }
 
@@ -100,6 +111,29 @@ fun processImage(context: Context, uri: Uri, onResult: (String) -> Unit) {
     }
 }
 
+fun translateText(context: Context, text: String, onResult: (String) -> Unit) {
+    val options = TranslatorOptions.Builder()
+        .setSourceLanguage(TranslateLanguage.KOREAN)
+        .setTargetLanguage(TranslateLanguage.ENGLISH)
+        .build()
+    val translator = Translation.getClient(options)
+
+    val conditions = DownloadConditions.Builder()
+        .requireWifi()
+        .build()
+
+    translator.downloadModelIfNeeded(conditions).addOnSuccessListener {
+        translator.translate(text).addOnSuccessListener { translatedText ->
+            onResult(translatedText)
+        }.addOnFailureListener { e ->
+            Log.e("Translation", "Translation failed", e)
+            onResult("")
+        }
+    }.addOnFailureListener { e ->
+        Log.e("Translation", "Model download failed", e)
+        onResult("")
+    }
+}
 @Preview(showBackground = true)
 @Composable
 fun MainScreenPreview() {
