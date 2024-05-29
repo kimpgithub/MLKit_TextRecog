@@ -1,7 +1,9 @@
 package com.example.mlkit_textrecog
 
+import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -22,10 +24,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 import com.example.mlkit_textrecog.ui.theme.MLKit_TextRecogTheme
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 
 
 class MainActivity : ComponentActivity() {
@@ -41,18 +47,20 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainScreen(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    var imgUri by remember { mutableStateOf<Uri?>(null) }
+    var recognizedText by remember { mutableStateOf<String>("") }
+    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        imgUri = uri
+        uri?.let { processImage(context, it) { recognizedText = it } }
+    }
+
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
 
     ) {
-        var imgUri by remember { mutableStateOf<Uri?>(null) }
-
-        val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-            imgUri = uri
-        }
-
         imgUri?.let { uri ->
             Image(
                 modifier = Modifier
@@ -71,6 +79,24 @@ fun MainScreen(modifier: Modifier = Modifier) {
         }) {
             Text(text = "Pick Image")
         }
+
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(text = recognizedText)
+
+    }
+}
+
+
+fun processImage(context: Context, uri: Uri, onResult: (String) -> Unit) {
+    val recognizer = TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
+    val image = InputImage.fromFilePath(context, uri)
+    recognizer.process(image).addOnSuccessListener { visionText ->
+        onResult(visionText.text)
+    }.addOnFailureListener { e ->
+        Log.e("TextRecognition", "Text recognition failed", e)
+        onResult("")
     }
 }
 
