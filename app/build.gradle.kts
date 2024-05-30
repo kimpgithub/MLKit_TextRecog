@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.android)
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -69,30 +70,30 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
     // To recognize Latin script
     implementation ("com.google.mlkit:text-recognition:16.0.0")
-
     // To recognize Chinese script
     implementation ("com.google.mlkit:text-recognition-chinese:16.0.0")
-
     // To recognize Devanagari script
     implementation ("com.google.mlkit:text-recognition-devanagari:16.0.0")
-
     // To recognize Japanese script
     implementation ("com.google.mlkit:text-recognition-japanese:16.0.0")
-
     // To recognize Korean script
     implementation ("com.google.mlkit:text-recognition-korean:16.0.0")
-
     implementation("androidx.core:core-ktx:1.13.1")
-
     implementation("io.coil-kt:coil-compose:2.6.0")
-
     implementation ("com.google.mlkit:translate:17.0.2")
-
-
     implementation ("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.6.0")
     val nav_version = "2.7.7"
     implementation("androidx.navigation:navigation-fragment-ktx:$nav_version")
     implementation("androidx.navigation:navigation-ui-ktx:$nav_version")
+    implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
+    implementation(libs.firebase.analytics)
+    implementation ("com.google.firebase:firebase-auth")
+    implementation ("com.google.firebase:firebase-firestore")
+    implementation ("com.google.firebase:firebase-storage")
+    implementation ("com.google.firebase:firebase-messaging:23.0.5")
+    implementation ("org.tensorflow:tensorflow-lite:2.9.0")
+
+
 
 
 
