@@ -92,9 +92,6 @@ dependencies {
     implementation ("com.google.firebase:firebase-storage")
     implementation ("com.google.firebase:firebase-messaging:23.0.5")
     implementation ("org.tensorflow:tensorflow-lite:2.9.0")
-
-
-
-
-
+    implementation ("androidx.lifecycle:lifecycle-runtime-ktx:2.4.0")
+    implementation ("androidx.lifecycle:lifecycle-viewmodel-ktx:2.4.0")
 }

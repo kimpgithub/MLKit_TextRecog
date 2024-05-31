@@ -27,7 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -63,13 +62,18 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import android.speech.tts.TextToSpeech
 
-class MainActivity : ComponentActivity() {
+
+class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private lateinit var auth: FirebaseAuth
     private lateinit var firebaseAnalytics: FirebaseAnalytics
     private lateinit var firestore: FirebaseFirestore
     private lateinit var storage: FirebaseStorage
-    private var lastProcessedBitmap: Bitmap? = null  // Add this variable to hold the last processed bitmap
+    private var lastProcessedBitmap: Bitmap? =
+        null  // Add this variable to hold the last processed bitmap
+    private lateinit var textToSpeech: TextToSpeech
+    private var ttsLanguage: Locale = Locale.KOREAN
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -79,6 +83,9 @@ class MainActivity : ComponentActivity() {
         firebaseAnalytics = FirebaseAnalytics.getInstance(this)
         firestore = FirebaseFirestore.getInstance()
         storage = FirebaseStorage.getInstance()
+        textToSpeech =
+            TextToSpeech(this, this)  // Initialize TextToSpeech after setting the language
+        setTtsLanguage("en")  // Default to English
 
         setContent {
             MLKit_TextRecogTheme {
@@ -105,7 +112,7 @@ class MainActivity : ComponentActivity() {
             }
     }
 
-    fun logUserActivity(activity: String, details: String) {
+    private fun logUserActivity(activity: String, details: String) {
         val logData = hashMapOf(
             "activity" to activity,
             "details" to details,
@@ -142,6 +149,9 @@ class MainActivity : ComponentActivity() {
             putString("selected_language", language)
         }
         firebaseAnalytics.logEvent("select_language", bundle)
+
+        // Set the TTS language whenever a new language is selected
+        setTtsLanguage(language)
     }
 
 
@@ -174,7 +184,8 @@ class MainActivity : ComponentActivity() {
 
     suspend fun recognizeTextFromImage(context: Context, uri: Uri): Text? {
         return try {
-            val recognizer = TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
+            val recognizer =
+                TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
             val image = InputImage.fromFilePath(context, uri)
             recognizer.process(image).await()
         } catch (e: Exception) {
@@ -219,7 +230,11 @@ class MainActivity : ComponentActivity() {
             }
     }
 
-    fun getHistory(userId: String, onSuccess: (List<HistoryItem>) -> Unit, onFailure: (Exception) -> Unit) {
+    fun getHistory(
+        userId: String,
+        onSuccess: (List<HistoryItem>) -> Unit,
+        onFailure: (Exception) -> Unit
+    ) {
         firestore.collection("translation_history")
             .whereEqualTo("userId", userId)
             .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
@@ -242,7 +257,7 @@ class MainActivity : ComponentActivity() {
 
     data class HistoryItem(val imageUrl: String, val translatedText: String, val timestamp: Long)
 
-    suspend fun drawBoundingBoxesAndText(context: Context, uri: Uri, recognizedText: Text): Bitmap? {
+    fun drawBoundingBoxesAndText(context: Context, uri: Uri, recognizedText: Text): Bitmap? {
         val originalBitmap = MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
         val rotatedBitmap = rotateBitmapIfRequired(context, originalBitmap, uri)
         val mutableBitmap = rotatedBitmap.copy(Bitmap.Config.ARGB_8888, true)
@@ -270,10 +285,11 @@ class MainActivity : ComponentActivity() {
         return mutableBitmap
     }
 
-    fun rotateBitmapIfRequired(context: Context, img: Bitmap, selectedImage: Uri): Bitmap {
+    private fun rotateBitmapIfRequired(context: Context, img: Bitmap, selectedImage: Uri): Bitmap {
         val input = context.contentResolver.openInputStream(selectedImage)
         val ei = input?.let { ExifInterface(it) }
-        val orientation = ei?.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_UNDEFINED)
+        val orientation =
+            ei?.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_UNDEFINED)
 
         return when (orientation) {
             ExifInterface.ORIENTATION_ROTATE_90 -> rotateImage(img, 90f)
@@ -292,283 +308,342 @@ class MainActivity : ComponentActivity() {
     fun getLastProcessedBitmap(): Bitmap? {
         return lastProcessedBitmap
     }
-}
-@Composable
-fun AppNavigator() {
-    val navController = rememberNavController()
-    NavHost(navController = navController, startDestination = "login") {
-        composable("login") { LoginScreen(navController) }
-        composable("language_selection") { LanguageSelectionScreen(navController) }
-        composable("image_translation/{selectedLanguage}") { backStackEntry ->
-            val selectedLanguage = backStackEntry.arguments?.getString("selectedLanguage")
-            selectedLanguage?.let { ImageTranslationScreen(navController, it) }
-        }
-        composable("transformable_image") {
-            TransformableImageScreen(navController)
-        }
-        composable("history") { HistoryScreen(navController) }
-    }
-}
-@Composable
-fun LanguageSelectionScreen(navController: NavHostController, modifier: Modifier = Modifier) {
-    val languages = listOf(
-        "Chinese" to TranslateLanguage.CHINESE,
-        "Devanagari" to TranslateLanguage.HINDI,
-        "Japanese" to TranslateLanguage.JAPANESE,
-        "Korean" to TranslateLanguage.KOREAN,
-        "English" to TranslateLanguage.ENGLISH
-    )
 
-    Column(
-        modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(text = "Select Language")
-        languages.forEach { (name, lang) ->
-            Button(onClick = {
-                navController.navigate("image_translation/$lang")
-            }) {
-                Text(name)
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            val result = textToSpeech.setLanguage(ttsLanguage)
+            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                Log.e("TTS", "The Language specified is not supported!")
+            }
+        } else {
+            Log.e("TTS", "Initialization failed")
+        }
+    }
+
+    fun speakText(text: String) {
+        textToSpeech.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+    }
+
+    override fun onDestroy() {
+        if (::textToSpeech.isInitialized) {
+            textToSpeech.stop()
+            textToSpeech.shutdown()
+        }
+        super.onDestroy()
+    }
+
+    fun setTtsLanguage(languageCode: String) {
+        ttsLanguage = when (languageCode) {
+            "cmn" -> Locale.CHINESE
+            "hi" -> Locale("hi", "IN")  // Locale for Hindi (Devanagari)
+            "ja" -> Locale.JAPANESE
+            "ko" -> Locale.KOREAN
+            else -> Locale.ENGLISH
+        }
+        if (::textToSpeech.isInitialized) {
+            val result = textToSpeech.setLanguage(ttsLanguage)
+            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                Log.e("TTS", "The Language specified is not supported!")
             }
         }
     }
-}
-@Composable
-fun LoginScreen(navController: NavHostController) {
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    val context = LocalContext.current
-    val activity = context as? MainActivity
 
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        TextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { Text("Email") }
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        TextField(
-            value = password,
-            onValueChange = { password = it },
-            label = { Text("Password") },
-            visualTransformation = PasswordVisualTransformation()
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(onClick = {
-            activity?.signInWithEmailAndPassword(email, password, {
-                navController.navigate("language_selection")
-            }, { exception ->
-                Log.e("LoginScreen", "Login failed", exception)
-            })
-        }) {
-            Text("Login")
+
+    @Composable
+    fun AppNavigator() {
+        val navController = rememberNavController()
+        NavHost(navController = navController, startDestination = "login") {
+            composable("login") { LoginScreen(navController) }
+            composable("language_selection") { LanguageSelectionScreen(navController) }
+            composable("image_translation/{selectedLanguage}") { backStackEntry ->
+                val selectedLanguage = backStackEntry.arguments?.getString("selectedLanguage")
+                selectedLanguage?.let { ImageTranslationScreen(navController, it) }
+            }
+            composable("transformable_image") {
+                TransformableImageScreen(navController)
+            }
+            composable("history") { HistoryScreen(navController) }
         }
     }
-}
 
-@Composable
-fun ImageTranslationScreen(
-    navController: NavHostController,
-    selectedLanguage: String,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    val activity = context as? MainActivity
-    var imgUri by remember { mutableStateOf<Uri?>(null) }
-    var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var recognizedText by remember { mutableStateOf("") }
-    var translatedText by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    val userId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+    @Composable
+    fun LanguageSelectionScreen(navController: NavHostController, modifier: Modifier = Modifier) {
+        val languages = listOf(
+            "Chinese" to TranslateLanguage.CHINESE,
+            "Devanagari" to TranslateLanguage.HINDI,
+            "Japanese" to TranslateLanguage.JAPANESE,
+            "Korean" to TranslateLanguage.KOREAN,
+            "English" to TranslateLanguage.ENGLISH
+        )
 
-    LaunchedEffect(Unit) {
-        activity?.logSelectedLanguage(userId, selectedLanguage)
+        Column(
+            modifier = modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(text = "Select Language")
+            languages.forEach { (name, lang) ->
+                Button(onClick = {
+                    navController.navigate("image_translation/$lang")
+                }) {
+                    Text(name)
+                }
+            }
+        }
     }
 
-    val pickImageLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-            imgUri = uri
-            uri?.let {
-                isLoading = true
-                CoroutineScope(Dispatchers.IO).launch {
-                    activity?.let { mainActivity ->
-                        try {
-                            val imageUrl = mainActivity.uploadImageAndLog(uri, context)
-                            val recognized = mainActivity.recognizeTextFromImage(context, uri)
-                            if (recognized != null) {
-                                recognizedText = recognized.text
-                                val translated = mainActivity.translateText(context, recognizedText, selectedLanguage)
-                                translatedText = translated
-                                processedBitmap = mainActivity.drawBoundingBoxesAndText(context, uri, recognized)
-                                mainActivity.saveHistory(userId, imageUrl, translated)
-                            } else {
-                                recognizedText = "Failed to recognize text."
-                                translatedText = ""
+    @Composable
+    fun LoginScreen(navController: NavHostController) {
+        var email by remember { mutableStateOf("") }
+        var password by remember { mutableStateOf("") }
+        val context = LocalContext.current
+        val activity = context as? MainActivity
+
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            TextField(
+                value = email,
+                onValueChange = { email = it },
+                label = { Text("Email") }
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            TextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text("Password") },
+                visualTransformation = PasswordVisualTransformation()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = {
+                activity?.signInWithEmailAndPassword(email, password, {
+                    navController.navigate("language_selection")
+                }, { exception ->
+                    Log.e("LoginScreen", "Login failed", exception)
+                })
+            }) {
+                Text("Login")
+            }
+        }
+    }
+
+    @Composable
+    fun ImageTranslationScreen(
+        navController: NavHostController,
+        selectedLanguage: String,
+        modifier: Modifier = Modifier
+    ) {
+        val context = LocalContext.current
+        val activity = context as? MainActivity
+        var imgUri by remember { mutableStateOf<Uri?>(null) }
+        var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+        var recognizedText by remember { mutableStateOf("") }
+        var translatedText by remember { mutableStateOf("") }
+        var isLoading by remember { mutableStateOf(false) }
+        val userId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+
+        LaunchedEffect(Unit) {
+            activity?.logSelectedLanguage(userId, selectedLanguage)
+        }
+
+        val pickImageLauncher =
+            rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+                imgUri = uri
+                uri?.let {
+                    isLoading = true
+                    CoroutineScope(Dispatchers.IO).launch {
+                        activity?.let { mainActivity ->
+                            try {
+                                val imageUrl = mainActivity.uploadImageAndLog(uri, context)
+                                val recognized = mainActivity.recognizeTextFromImage(context, uri)
+                                if (recognized != null) {
+                                    recognizedText = recognized.text
+                                    val translated = mainActivity.translateText(
+                                        context,
+                                        recognizedText,
+                                        selectedLanguage
+                                    )
+                                    translatedText = translated
+                                    processedBitmap = mainActivity.drawBoundingBoxesAndText(
+                                        context,
+                                        uri,
+                                        recognized
+                                    )
+                                    mainActivity.saveHistory(userId, imageUrl, translated)
+                                } else {
+                                    recognizedText = "Failed to recognize text."
+                                    translatedText = ""
+                                }
+                            } catch (e: Exception) {
+                                Log.e("ImageTranslationScreen", "Error processing image", e)
+                            } finally {
+                                isLoading = false
                             }
-                        } catch (e: Exception) {
-                            Log.e("ImageTranslationScreen", "Error processing image", e)
-                        } finally {
-                            isLoading = false
                         }
                     }
                 }
             }
-        }
 
-    Column(
-        modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        if (isLoading) {
-            CircularProgressIndicator()
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(text = "Processing...")
-        } else {
-            processedBitmap?.let {
-                Image(
-                    bitmap = it.asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .height(200.dp)
-                        .fillMaxWidth()
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Button(onClick = { pickImageLauncher.launch("image/*") }) {
-                Text("Pick Image")
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(text = recognizedText)
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(text = translatedText)
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = { navController.navigate("history") }) {
-                Text("Show My History")
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = { navController.navigate("transformable_image") }) {
-                Text("Zoom Image")
-            }
-        }
-    }
-}
-@Composable
-fun TransformableImageScreen(navController: NavHostController) {
-    val context = LocalContext.current
-    val activity = context as? MainActivity
-    var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
-
-    LaunchedEffect(Unit) {
-        CoroutineScope(Dispatchers.IO).launch {
-            processedBitmap = activity?.getLastProcessedBitmap()
-        }
-    }
-
-    processedBitmap?.let { bitmap ->
-        TransformableImage(bitmap = bitmap.asImageBitmap())
-    }
-}
-
-@Composable
-fun TransformableImage(
-    bitmap: ImageBitmap,
-    modifier: Modifier = Modifier
-) {
-    var scale by remember { mutableStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-    val state = rememberTransformableState { zoomChange, offsetChange, _ ->
-        scale *= zoomChange
-        offset += offsetChange
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .graphicsLayer(
-                scaleX = scale,
-                scaleY = scale,
-                translationX = offset.x,
-                translationY = offset.y
-            )
-            .transformable(state = state)
-    ) {
-        Image(
-            bitmap = bitmap,
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize()
-        )
-    }
-}
-@Composable
-fun HistoryScreen(navController: NavHostController) {
-    val context = LocalContext.current
-    val activity = context as? MainActivity
-    val userId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
-    var historyList by remember { mutableStateOf<List<MainActivity.HistoryItem>>(emptyList()) }
-
-    LaunchedEffect(Unit) {
-        activity?.getHistory(userId, { history ->
-            historyList = history
-        }, { e ->
-            Log.e("HistoryScreen", "Failed to fetch history", e)
-        })
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.Top,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(text = "My History", style = MaterialTheme.typography.titleLarge)
-        Spacer(modifier = Modifier.height(16.dp))
-
-        historyList.forEach { item ->
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.Start
-            ) {
-                Image(
-                    painter = rememberAsyncImagePainter(model = item.imageUrl),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .height(100.dp)
-                        .fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(text = item.translatedText.take(50) + "...")
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(text = "Timestamp: ${convertTimestampToReadable(item.timestamp)}")
+        Column(
+            modifier = modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator()
                 Spacer(modifier = Modifier.height(16.dp))
+                Text(text = "Processing...")
+            } else {
+                processedBitmap?.let {
+                    Image(
+                        bitmap = it.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .height(200.dp)
+                            .fillMaxWidth()
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(onClick = { pickImageLauncher.launch("image/*") }) {
+                    Text("Pick Image")
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(text = recognizedText)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(text = translatedText)
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = { navController.navigate("history") }) {
+                    Text("Show My History")
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = { navController.navigate("transformable_image") }) {
+                    Text("Zoom Image")
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = {
+                    activity?.speakText(translatedText)
+                }) {
+                    Text("Read Translated Text")
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun TransformableImageScreen(navController: NavHostController) {
+        val context = LocalContext.current
+        val activity = context as? MainActivity
+        var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+        LaunchedEffect(Unit) {
+            CoroutineScope(Dispatchers.IO).launch {
+                processedBitmap = activity?.getLastProcessedBitmap()
             }
         }
 
-        Button(onClick = { navController.navigateUp() }) {
-            Text("Back")
+        processedBitmap?.let { bitmap ->
+            TransformableImage(bitmap = bitmap.asImageBitmap())
         }
     }
-}
 
-fun convertTimestampToReadable(timestamp: Long): String {
-    val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-    val date = Date(timestamp)
-    return sdf.format(date)
+    @Composable
+    fun TransformableImage(
+        bitmap: ImageBitmap,
+        modifier: Modifier = Modifier
+    ) {
+        var scale by remember { mutableStateOf(1f) }
+        var offset by remember { mutableStateOf(Offset.Zero) }
+        val state = rememberTransformableState { zoomChange, offsetChange, _ ->
+            scale *= zoomChange
+            offset += offsetChange
+        }
+
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .graphicsLayer(
+                    scaleX = scale,
+                    scaleY = scale,
+                    translationX = offset.x,
+                    translationY = offset.y
+                )
+                .transformable(state = state)
+        ) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+
+    @Composable
+    fun HistoryScreen(navController: NavHostController) {
+        val context = LocalContext.current
+        val activity = context as? MainActivity
+        val userId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+        var historyList by remember { mutableStateOf<List<MainActivity.HistoryItem>>(emptyList()) }
+
+        LaunchedEffect(Unit) {
+            activity?.getHistory(userId, { history ->
+                historyList = history
+            }, { e ->
+                Log.e("HistoryScreen", "Failed to fetch history", e)
+            })
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.Top,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(text = "My History", style = MaterialTheme.typography.titleLarge)
+            Spacer(modifier = Modifier.height(16.dp))
+
+            historyList.forEach { item ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.Start
+                ) {
+                    Image(
+                        painter = rememberAsyncImagePainter(model = item.imageUrl),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .height(100.dp)
+                            .fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = item.translatedText.take(50) + "...")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = "Timestamp: ${convertTimestampToReadable(item.timestamp)}")
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+
+            Button(onClick = { navController.navigateUp() }) {
+                Text("Back")
+            }
+        }
+    }
+
+    fun convertTimestampToReadable(timestamp: Long): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+        val date = Date(timestamp)
+        return sdf.format(date)
+    }
 }
 
